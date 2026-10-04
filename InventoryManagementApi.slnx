@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="InventoryManagementApi/InventoryManagementApi.csproj" />
+  <Project Path="InventoryManagementWorker/InventoryManagementWorker.csproj" Id="751389d7-87aa-4e16-b99f-ab2caba21b3c" />
+</Solution>
