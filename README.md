@@ -1,13 +1,22 @@
 # Inventory Management API
 
-Backend-only inventory management system built with ASP.NET Core, Entity Framework Core, PostgreSQL, and a .NET Worker Service.
+Backend-only inventory management system built with ASP.NET Core, Entity Framework Core, PostgreSQL, .NET Worker Service, TCP sockets, and Docker.
 
 The application manages product categories, products, stock transactions, low-stock detection, automatic restocking, and TCP communication between the API and Worker service.
+
+The complete system can be executed locally with .NET or as a Dockerized multi-container application.
+
+---
 
 ## Project Structure
 
 ```text
 InventoryManagementApi/
+├── compose.yaml
+├── .dockerignore
+├── README.md
+├── InventoryManagementApi.slnx
+│
 ├── InventoryManagementApi/
 │   ├── Controllers/
 │   ├── Data/
@@ -20,17 +29,18 @@ InventoryManagementApi/
 │   ├── Tcp/
 │   ├── Program.cs
 │   ├── appsettings.json
-│   ├── Dockerfile
-│   └── docker-compose.yml
+│   ├── InventoryManagementApi.csproj
+│   └── Dockerfile
 │
-├── InventoryManagementWorker/
-│   ├── Worker.cs
-│   ├── Program.cs
-│   └── appsettings.json
-│
-├── README.md
-└── InventoryManagementApi.slnx
+└── InventoryManagementWorker/
+    ├── Worker.cs
+    ├── Program.cs
+    ├── appsettings.json
+    ├── InventoryManagementWorker.csproj
+    └── Dockerfile
 ```
+
+---
 
 ## Technologies
 
@@ -44,8 +54,12 @@ InventoryManagementApi/
 - TCP sockets
 - .NET Worker Service
 - Docker
+- Docker Compose
+- DBeaver
 
-## Database
+---
+
+# Database
 
 The system uses exactly three application tables:
 
@@ -59,7 +73,7 @@ Entity Framework Core also creates:
 __EFMigrationsHistory
 ```
 
-### Relationships
+## Relationships
 
 ```text
 Categories
@@ -77,7 +91,11 @@ A Category can contain many Products.
 
 A Product belongs to one Category and can have many StockTransactions.
 
-## Prerequisites
+---
+
+# Prerequisites
+
+## Local Development
 
 Required:
 
@@ -88,7 +106,7 @@ Required:
 Optional:
 
 - OpenBSD Netcat for manual TCP testing
-- Docker
+- DBeaver
 
 For Arch Linux / CachyOS:
 
@@ -108,7 +126,29 @@ If the global .NET tool directory is not available in `PATH`:
 export PATH="$PATH:$HOME/.dotnet/tools"
 ```
 
-## PostgreSQL Setup
+## Docker Deployment
+
+Required:
+
+- Docker
+- Docker Compose
+
+Verify Docker:
+
+```bash
+docker --version
+docker compose version
+```
+
+Verify the Docker daemon:
+
+```bash
+systemctl status docker
+```
+
+---
+
+# Local PostgreSQL Setup
 
 Start PostgreSQL:
 
@@ -136,13 +176,15 @@ Exit PostgreSQL:
 \q
 ```
 
-The application uses this connection string by default:
+The application uses this connection string by default when running outside Docker:
 
 ```text
 Host=localhost;Port=5432;Database=inventory_db;Username=inventory_user;Password=inventory_password
 ```
 
-## Restore and Build
+---
+
+# Restore and Build
 
 From the solution root:
 
@@ -151,15 +193,16 @@ dotnet restore
 dotnet build
 ```
 
-## Apply EF Core Migrations
-
-Run:
+Or build the applications independently:
 
 ```bash
-dotnet ef database update \
-  --project InventoryManagementApi \
-  --startup-project InventoryManagementApi
+dotnet build InventoryManagementApi/InventoryManagementApi.csproj
+dotnet build InventoryManagementWorker/InventoryManagementWorker.csproj
 ```
+
+---
+
+# EF Core Migrations
 
 Current migrations:
 
@@ -175,6 +218,30 @@ The seed data contains:
 - 3 categories
 - 10 products
 - 5 stock transactions
+
+## Local Migration
+
+For local PostgreSQL:
+
+```bash
+dotnet ef database update \
+  --project InventoryManagementApi \
+  --startup-project InventoryManagementApi
+```
+
+## Docker Migration
+
+When the API container starts, migrations are applied automatically using:
+
+```csharp
+await dbContext.Database.MigrateAsync();
+```
+
+Therefore, manual `dotnet ef database update` is not required for a new Docker database.
+
+---
+
+# Run Locally
 
 ## Run the API
 
@@ -196,10 +263,10 @@ Swagger UI:
 http://localhost:5064/swagger
 ```
 
-The API also starts the TCP server on:
+The API also starts the TCP server on port:
 
 ```text
-127.0.0.1:5050
+5050
 ```
 
 ## Run the Worker
@@ -209,6 +276,14 @@ Open another terminal:
 ```bash
 dotnet run --project InventoryManagementWorker
 ```
+
+The Worker connects to:
+
+```text
+127.0.0.1:5050
+```
+
+when running locally.
 
 The Worker periodically performs this TCP cycle:
 
@@ -232,9 +307,11 @@ The Worker writes summary reports to:
 InventoryManagementWorker/logs/inventory-report.log
 ```
 
-## REST API Endpoints
+---
 
-### Categories
+# REST API Endpoints
+
+## Categories
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -246,7 +323,9 @@ InventoryManagementWorker/logs/inventory-report.log
 
 A category cannot be deleted while one or more products reference it.
 
-### Products
+---
+
+## Products
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -283,7 +362,9 @@ Stock changes are recorded through StockTransactions.
 
 A Product cannot be deleted if it already has stock transactions.
 
-### Stock Transactions
+---
+
+## Stock Transactions
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -308,15 +389,17 @@ Transaction sources:
 2 = Worker
 ```
 
-## Stock Business Rules
+---
 
-### Stock In
+# Stock Business Rules
+
+## Stock In
 
 The quantity must be positive.
 
 The quantity is added to the current stock.
 
-### Stock Out
+## Stock Out
 
 The quantity must be positive.
 
@@ -339,7 +422,7 @@ Expected response:
 400 Bad Request
 ```
 
-with:
+Example error:
 
 ```json
 {
@@ -349,13 +432,15 @@ with:
 }
 ```
 
-### Adjustment
+## Adjustment
 
 Adjustment can use a positive or negative quantity.
 
 The operation is rejected if the resulting inventory would become negative.
 
-## Low Stock
+---
+
+# Low Stock
 
 A Product is considered low-stock when:
 
@@ -369,7 +454,9 @@ Endpoint:
 GET /api/Products/low-stock
 ```
 
-## TCP Protocol
+---
+
+# TCP Protocol
 
 TCP communication uses newline-delimited JSON.
 
@@ -410,9 +497,11 @@ General error response:
 }
 ```
 
-## TCP Commands
+---
 
-### PING
+# TCP Commands
+
+## PING
 
 Request:
 
@@ -426,7 +515,9 @@ Response:
 {"requestId":"manual-001","status":"ok","data":"PONG","error":null}
 ```
 
-### GET_LOW_STOCK
+---
+
+## GET_LOW_STOCK
 
 Request:
 
@@ -440,7 +531,9 @@ Returns products where:
 QuantityInStock <= ReorderLevel
 ```
 
-### RESTOCK
+---
+
+## RESTOCK
 
 Request:
 
@@ -462,7 +555,9 @@ Type = In
 Source = Worker
 ```
 
-### GET_SUMMARY
+---
+
+## GET_SUMMARY
 
 Request:
 
@@ -479,7 +574,9 @@ lowStockCount
 stockValue
 ```
 
-### Invalid Command
+---
+
+## Invalid Command
 
 Request:
 
@@ -501,9 +598,11 @@ Example response:
 }
 ```
 
-## Manual TCP Test with Netcat
+---
 
-Connect:
+# Manual TCP Test with Netcat
+
+When the API is running directly on the host:
 
 ```bash
 nc 127.0.0.1 5050
@@ -518,14 +617,18 @@ Example commands:
 {"requestId":"manual-004","command":"INVALID_COMMAND"}
 ```
 
-## Worker Example
+Port `5050` is used internally between containers when running with Docker Compose and is not published to the host by default.
+
+---
+
+# Worker Example
 
 Example successful cycle:
 
 ```text
 ===== Inventory Worker Cycle Started =====
 
-Connected to TCP server 127.0.0.1:5050.
+Connected to TCP server api:5050.
 
 TCP server responded with PONG.
 
@@ -544,7 +647,21 @@ Units Added This Cycle: 6
 ===== Inventory Worker Cycle Finished =====
 ```
 
-## Validation and Error Handling
+When running outside Docker, the Worker uses:
+
+```text
+127.0.0.1:5050
+```
+
+When running in Docker, the Worker uses:
+
+```text
+api:5050
+```
+
+---
+
+# Validation and Error Handling
 
 The application validates:
 
@@ -571,7 +688,9 @@ HTTP errors use ASP.NET Core `ProblemDetails`.
 
 TCP errors use structured JSON responses.
 
-## Worker Reliability
+---
+
+# Worker Reliability
 
 The Worker supports:
 
@@ -582,7 +701,9 @@ The Worker supports:
 - Disconnection handling
 - Reconnection on future polling cycles
 
-## TCP Concurrency
+---
+
+# TCP Concurrency
 
 The TCP server supports multiple connected clients.
 
@@ -590,18 +711,577 @@ Each client connection is handled independently.
 
 The TCP protocol uses newline-delimited JSON framing and limits an individual input line to 8 KB.
 
-## Docker
+---
 
-Docker support is included as an optional bonus.
+# Dockerized Inventory Management System
 
-Files:
+The complete system can be executed with Docker Compose.
+
+The Docker environment consists of three services:
 
 ```text
-InventoryManagementApi/Dockerfile
-InventoryManagementApi/docker-compose.yml
+db
+api
+worker
 ```
 
-## Evidence
+Architecture:
+
+```text
+Browser / Swagger
+       |
+       | localhost:5064
+       v
++-----------------------+
+| inventory-api         |
+| ASP.NET Core          |
+| HTTP :8080            |
+| TCP  :5050            |
++----------+------------+
+           |
+           | db:5432
+           v
++-----------------------+
+| inventory-db          |
+| PostgreSQL 18         |
+| PostgreSQL :5432      |
++-----------------------+
+           ^
+           |
+           | persistent volume
+           |
+ inventory_postgres_data
+
+
++-----------------------+
+| inventory-worker      |
+| .NET Worker Service   |
++----------+------------+
+           |
+           | TCP api:5050
+           v
+     inventory-api
+```
+
+---
+
+## Docker Files
+
+```text
+compose.yaml
+.dockerignore
+
+InventoryManagementApi/
+└── Dockerfile
+
+InventoryManagementWorker/
+└── Dockerfile
+```
+
+---
+
+## Docker Network Communication
+
+Docker Compose creates an internal network where services can communicate using their service names.
+
+API to PostgreSQL:
+
+```text
+Host=db
+Port=5432
+```
+
+Worker to API TCP server:
+
+```text
+Host=api
+Port=5050
+```
+
+The applications must not use `localhost` for communication between different containers.
+
+---
+
+## Docker Ports
+
+| Service | Host | Container | Purpose |
+|---|---:|---:|---|
+| API | `5064` | `8080` | REST API / Swagger |
+| PostgreSQL | `5433` | `5432` | DBeaver / host access |
+| TCP Server | Internal only | `5050` | Worker → API TCP |
+
+PostgreSQL uses host port `5433` so it can run alongside a local PostgreSQL instance using port `5432`.
+
+---
+
+## Validate Docker Compose
+
+From the solution root:
+
+```bash
+docker compose config
+```
+
+List configured services:
+
+```bash
+docker compose config --services
+```
+
+Expected:
+
+```text
+db
+api
+worker
+```
+
+---
+
+## Build Docker Images
+
+```bash
+docker compose build
+```
+
+The build creates:
+
+```text
+inventorymanagementapi-api
+inventorymanagementapi-worker
+```
+
+PostgreSQL uses the official:
+
+```text
+postgres:18
+```
+
+image.
+
+---
+
+## Start the Complete System
+
+Run:
+
+```bash
+docker compose up -d
+```
+
+Check the containers:
+
+```bash
+docker compose ps
+```
+
+Expected services:
+
+```text
+inventory-db
+inventory-api
+inventory-worker
+```
+
+The database should report:
+
+```text
+healthy
+```
+
+---
+
+## Swagger with Docker
+
+Swagger is available at:
+
+```text
+http://localhost:5064/swagger
+```
+
+Example endpoint:
+
+```text
+GET /api/Products?page=1&pageSize=10
+```
+
+Expected:
+
+```text
+200 OK
+```
+
+---
+
+## PostgreSQL with Docker
+
+The PostgreSQL container uses:
+
+```text
+Database : inventory_db
+Username : inventory_user
+Password : inventory_password
+```
+
+Inside the Docker network:
+
+```text
+Host : db
+Port : 5432
+```
+
+From the host machine:
+
+```text
+Host : localhost
+Port : 5433
+```
+
+---
+
+# DBeaver Configuration
+
+Create a PostgreSQL connection using:
+
+```text
+Host     : localhost
+Port     : 5433
+Database : inventory_db
+Username : inventory_user
+Password : inventory_password
+```
+
+The expected application tables are:
+
+```text
+Categories
+Products
+StockTransactions
+__EFMigrationsHistory
+```
+
+Example verification query:
+
+```sql
+SELECT *
+FROM "Products"
+ORDER BY "Id";
+```
+
+Check migrations:
+
+```sql
+SELECT *
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+```
+
+---
+
+# Docker Worker Verification
+
+Check Worker logs:
+
+```bash
+docker compose logs worker --tail=50
+```
+
+A healthy TCP cycle contains output similar to:
+
+```text
+Connecting to TCP server api:5050...
+Connected to TCP server api:5050.
+TCP server responded with PONG.
+Low-stock products found: 0
+INVENTORY SUMMARY ...
+Inventory report written to /app/logs/inventory-report.log.
+```
+
+Filter important messages:
+
+```bash
+docker compose logs worker --tail=100 |
+grep -E "PONG|Low-stock|Restocked|INVENTORY SUMMARY"
+```
+
+---
+
+# Docker Automatic Restock Test
+
+Stop the Worker temporarily:
+
+```bash
+docker compose stop worker
+```
+
+Create a Stock Out transaction that makes a product low-stock.
+
+Example for Product `1001`:
+
+```json
+{
+  "productId": 1001,
+  "type": "Out",
+  "quantity": 16,
+  "note": "Docker worker automatic restock test"
+}
+```
+
+If the original stock is `20`, the new quantity becomes:
+
+```text
+4
+```
+
+For:
+
+```text
+ReorderLevel = 5
+```
+
+the product is low-stock because:
+
+```text
+4 <= 5
+```
+
+Verify:
+
+```text
+GET /api/Products/low-stock
+```
+
+Start the Worker again:
+
+```bash
+docker compose start worker
+```
+
+The Worker calculates:
+
+```text
+Restock Quantity
+= (2 × ReorderLevel) - QuantityInStock
+
+= (2 × 5) - 4
+
+= 6
+```
+
+The expected final stock is:
+
+```text
+10
+```
+
+Verify:
+
+```text
+GET /api/Products/1001
+```
+
+The expected result contains:
+
+```json
+{
+  "quantityInStock": 10,
+  "reorderLevel": 5
+}
+```
+
+The low-stock endpoint should then return an empty collection if no other products are low-stock:
+
+```json
+[]
+```
+
+---
+
+# Docker Persistence Test
+
+The PostgreSQL database uses a named Docker volume:
+
+```text
+inventorymanagementapi_inventory_postgres_data
+```
+
+Check it using:
+
+```bash
+docker volume ls | grep inventory
+```
+
+To test persistence:
+
+```bash
+docker compose down
+```
+
+Then:
+
+```bash
+docker compose up -d
+```
+
+Verify the data again through Swagger or DBeaver.
+
+Existing stock values and transaction history should remain available.
+
+Do not use:
+
+```bash
+docker compose down -v
+```
+
+unless the database volume should intentionally be deleted.
+
+The `-v` option removes the PostgreSQL volume and its stored database data.
+
+---
+
+# Docker Logs
+
+API:
+
+```bash
+docker compose logs api --tail=50
+```
+
+Worker:
+
+```bash
+docker compose logs worker --tail=50
+```
+
+Database:
+
+```bash
+docker compose logs db --tail=50
+```
+
+Follow Worker logs continuously:
+
+```bash
+docker compose logs -f worker
+```
+
+---
+
+# Docker Restart
+
+Restart all services:
+
+```bash
+docker compose restart
+```
+
+Restart only the API:
+
+```bash
+docker compose restart api
+```
+
+Restart only the Worker:
+
+```bash
+docker compose restart worker
+```
+
+---
+
+# Stop Docker System
+
+Stop and remove the containers:
+
+```bash
+docker compose down
+```
+
+Database data remains because the named volume is preserved.
+
+To start again:
+
+```bash
+docker compose up -d
+```
+
+---
+
+# Docker Final Verification
+
+Check running containers:
+
+```bash
+docker compose ps
+```
+
+Expected:
+
+```text
+inventory-db       Up (healthy)
+inventory-api      Up
+inventory-worker   Up
+```
+
+Check services:
+
+```bash
+docker compose config --services
+```
+
+Expected:
+
+```text
+db
+api
+worker
+```
+
+Check volume:
+
+```bash
+docker volume ls | grep inventory
+```
+
+Expected:
+
+```text
+inventorymanagementapi_inventory_postgres_data
+```
+
+Check Worker TCP:
+
+```bash
+docker compose logs worker --tail=100 |
+grep -E "PONG|Low-stock|Restocked|INVENTORY SUMMARY"
+```
+
+---
+
+# Tugas 10 Verification Summary
+
+The Dockerized Inventory Management System has been verified with:
+
+- PostgreSQL running in Docker
+- ASP.NET Core API running in Docker
+- .NET Worker Service running in Docker
+- Three services managed by Docker Compose
+- PostgreSQL health check
+- Automatic EF Core migrations
+- Swagger accessible through `localhost:5064`
+- PostgreSQL accessible through `localhost:5433`
+- DBeaver connected to Docker PostgreSQL
+- API → PostgreSQL container communication
+- Worker → API TCP container communication
+- TCP `PING` / `PONG`
+- Low-stock detection
+- Automatic Worker restocking
+- Docker volume persistence
+- Container restart without database data loss
+
+---
+
+# Evidence
 
 Recommended submission evidence structure:
 
@@ -615,6 +1295,12 @@ evidence/
 │   └── full-cycle.png
 ├── tcp/
 │   └── manual-tcp-test.png
+├── docker/
+│   ├── docker-compose-ps.png
+│   ├── swagger-docker.png
+│   ├── worker-docker-log.png
+│   ├── dbeaver-docker.png
+│   └── persistence-test.png
 └── er-diagram/
     └── inventory-er-diagram.png
 ```
@@ -631,8 +1317,17 @@ Evidence should include:
 - Worker full cycle
 - Manual TCP test
 - TCP error response
+- Docker Compose services running
+- PostgreSQL Docker healthy
+- Swagger running from Docker
+- DBeaver connected to Docker PostgreSQL
+- Worker TCP communication between containers
+- Automatic restock from Worker
+- Database persistence after Docker restart
 
-## ER Diagram
+---
+
+# ER Diagram
 
 The project contains three related application entities:
 
